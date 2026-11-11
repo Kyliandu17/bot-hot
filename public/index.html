@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot Host</title>
+<style>
+:root{--bg:#eef1f5;--panel:#fff;--ink:#16202e;--mute:#6a7686;--line:#d5dbe3;--accent:#2457d6;--ok:#1f9d55;--off:#a3acb8;--bad:#c0392b;--logbg:#101826;--logink:#cfe3ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0d121b;--panel:#161d29;--ink:#e6ebf2;--mute:#8b97a8;--line:#273142;--accent:#6b97ff;--ok:#3ecf7a;--off:#556070;--bad:#ff7a6b;--logbg:#080c14;--logink:#bcd3f5}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+button,input,textarea{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--bad)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input,textarea{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+label{display:block;font-weight:600;margin:14px 0 6px}
+#login{max-width:340px;margin:18vh auto;padding:0 16px}
+#app{display:none;min-height:100vh;grid-template-columns:280px 1fr}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:16px;display:flex;flex-direction:column;gap:12px}
+h1{font-size:18px;margin:0}
+.bot{display:flex;align-items:center;gap:10px;width:100%;text-align:left;margin-bottom:6px}
+.bot.sel{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--off);flex:none}
+.dot.on{background:var(--ok)}
+main{padding:20px;min-width:0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.status{color:var(--mute);margin:2px 0 14px}
+pre{background:var(--logbg);color:var(--logink);border-radius:8px;padding:12px;height:320px;overflow:auto;margin:6px 0 0;font:12.5px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+textarea{min-height:110px;font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.err{color:var(--bad);min-height:20px;margin:8px 0 0}
+.empty{color:var(--mute)}
+  @media (max-width:760px){#app{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<section id="login">
+  <h1>Bot Host</h1>
+  <label for="pw">Mot de passe</label>
+  <input id="pw" type="password" autocomplete="current-password">
+  <p class="err" id="lerr"></p>
+  <button class="primary" id="lbtn">Se connecter</button>
+</section>
+
+<div id="app">
+  <aside>
+    <h1>Mes bots</h1>
+    <div id="list"></div>
+    <details>
+      <summary>Ajouter un bot</summary>
+      <label for="nname">Nom</label>
+      <input id="nname" maxlength="40">
+      <label for="nfile">Fichier (.js ou .zip)</label>
+      <input id="nfile" type="file" accept=".js,.zip">
+      <p class="row"><button class="primary" id="nbtn">Créer le bot</button></p>
+    </details>
+    <button id="out">Se déconnecter</button>
+  </aside>
+  <main id="main"><p class="empty">Choisis un bot ou ajoutes-en un.</p></main>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let token = localStorage.getItem('bh_token'), cur = null, bots = [];
+
+async function api(path, opts = {}) {
+  const headers = { Authorization: 'Bearer ' + token };
+  if (opts.json) { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(opts.json); }
+  const r = await fetch('/api' + path, { ...opts, headers });
+  if (r.status === 401 && path !== '/login') { logout(); throw new Error('Session expirée.'); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'Erreur');
+  return d;
+}
+function logout() { token = null; localStorage.removeItem('bh_token'); show(); }
+function show() { $('#login').style.display = token ? 'none' : 'block'; $('#app').style.display = token ? 'grid' : 'none'; if (token) refresh(); }
+
+$('#lbtn').onclick = async () => {
+  try { const d = await api('/login', { method: 'POST', json: { password: $('#pw').value } });
+    token = d.token; localStorage.setItem('bh_token', token); $('#pw').value = ''; $('#lerr').textContent = ''; show();
+  } catch (e) { $('#lerr').textContent = e.message; }
+};
+$('#pw').onkeydown = e => { if (e.key === 'Enter') $('#lbtn').click(); };
+$('#out').onclick = logout;
+
+$('#nbtn').onclick = async () => {
+  const f = $('#nfile').files[0], fd = new FormData();
+  fd.append('name', $('#nname').value); if (f) fd.append('file', f);
+  try { const b = await api('/bots', { method: 'POST', body: fd }); $('#nname').value = ''; $('#nfile').value = ''; cur = b.id; await refresh(true); }
+  catch (e) { alert(e.message); }
+};
+
+async function refresh(full) {
+  try { bots = await api('/bots'); } catch { return; }
+  const list = $('#list'); list.textContent = '';
+  if (!bots.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = 'Aucun bot pour l’instant.'; list.append(p); }
+  bots.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = 'bot' + (b.id === cur ? ' sel' : '');
+    const dot = document.createElement('span'); dot.className = 'dot' + (b.running ? ' on' : '');
+    const name = document.createElement('span'); name.textContent = b.name;
+    btn.append(dot, name); btn.onclick = () => { cur = b.id; refresh(true); };
+    list.append(btn);
+  });
+  const b = bots.find(x => x.id === cur);
+  if (!b) { if (full) $('#main').innerHTML = '<p class="empty">Choisis un bot ou ajoutes-en un.</p>'; return; }
+  if (full || $('#main').dataset.id !== b.id) renderMain(b);
+  updateMain(b);
+  }
+
+  async function updateMain(b) {
+  $('#st').textContent = b.running ? 'En ligne' : 'Arrêté';
+  try {
+    const d = await api(`/bots/${b.id}/logs`), pre = $('#logs');
+    const stick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 30;
+    pre.textContent = d.logs.length ? d.logs.join('\n') : 'Aucun log pour l’instant.';
+    if (stick) pre.scrollTop = pre.scrollHeight;
+  } catch {}
+}
+setInterval(() => { if (token) refresh(); }, 3000);
+show();
+</script>
+</body>
+</html>
