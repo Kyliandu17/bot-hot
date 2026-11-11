@@ -1,6 +1,7 @@
 {
   "name": "bot-host",
   "version": "1.0.0",
+  "license": "MIT",
   "description": "Panel d'hébergement de bots Discord (Node.js)",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
